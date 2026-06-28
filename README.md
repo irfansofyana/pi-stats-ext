@@ -4,6 +4,8 @@
 
 Local-first Pi coding-agent usage dashboard.
 
+![pi-stats dashboard](docs/img/pi-stats-dashboard.png)
+
 ## Dashboard
 
 `/pi-stats` opens a dense Ops-console TUI over local session history:
