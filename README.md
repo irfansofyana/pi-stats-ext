@@ -4,6 +4,8 @@
 
 Local-first Pi coding-agent usage dashboard.
 
+![pi-stats overview](docs/img/pi-stats-overview.png)
+
 ![pi-stats dashboard](docs/img/pi-stats-dashboard.png)
 
 ## Dashboard
