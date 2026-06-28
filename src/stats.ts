@@ -119,6 +119,7 @@ export function dayKey(timestamp: number): string {
 export function parseRange(input: string, now = Date.now()): DateRange {
   const text = input.trim();
   if (!text || text === "30" || text === "30d") return lastDaysRange(30, now);
+  if (text === "today") return lastDaysRange(1, now, "today");
   if (text === "7" || text === "7d") return lastDaysRange(7, now);
   if (text === "90" || text === "90d") return lastDaysRange(90, now);
   if (text === "all") return { label: "all time" };
@@ -135,10 +136,10 @@ export function parseRange(input: string, now = Date.now()): DateRange {
   return lastDaysRange(30, now);
 }
 
-function lastDaysRange(days: number, now: number): DateRange {
+function lastDaysRange(days: number, now: number, label = `last ${days}d`): DateRange {
   const endDay = Date.parse(dayKey(now) + "T00:00:00.000Z") + DAY_MS;
   const start = endDay - days * DAY_MS;
-  return { label: `last ${days}d`, start, end: endDay };
+  return { label, start, end: endDay };
 }
 
 export async function loadCache(cachePath: string): Promise<StatsCache> {

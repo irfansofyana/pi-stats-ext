@@ -10,7 +10,7 @@ Medium
 
 ## Current Status
 
-Done: custom `/pi-stats` implemented, then upgraded beyond MVP to dense Ops-console TUI with colored cards, Claude Code-style usage insights, heatmap legend, model token graphic, and bordered tables.
+Done: custom `/pi-stats` implemented, then upgraded beyond MVP to dense multi-view Ops-console TUI with global date filter, `today` preset, same-day custom ranges, in-TUI custom date input, colored cards, Claude Code-style usage insights, heatmap legend, model token graphic, and bordered tables.
 
 ## Local Instructions
 
@@ -23,7 +23,7 @@ Repo instruction files consulted: none present in current repo. `README.md` only
 - Scan all Pi sessions by default.
 - Use incremental JSON cache keyed by session path, mtime, and size; first run may show partial stats while indexing.
 - Visual direction after MVP: dense Ops-console, terminal-native, colored scan cues, low decoration.
-- Dashboard UI: summary cards, usage insights, colored heatmap with date axis/legend, model token mix graphic, bordered top models/projects/sessions tables.
+- Dashboard UI: multi-view layout (Overview, Models, Projects, Sessions), global date filter with `today` preset and same-day custom ranges, inline custom date input, summary cards, usage insights, colored heatmap with date axis/legend, model token mix graphic, bordered top models/projects/sessions tables.
 - Analytics: totals, input/output/cache tokens, cost, favorite model, most active day, longest session, longest/current streak, top models, active days, top sessions, top projects.
 - Project labels use folder name in tables; full path in project table.
 - Out of scope for now: date picker, gamification, SQLite/server, browser dashboard, new UI dependencies.
@@ -58,21 +58,26 @@ Research conclusion: this space is crowded. A useful custom extension should be 
 - [x] Upgrade UI beyond MVP to dense Ops-console dashboard.
 - [x] Update README and workflow docs for new dashboard direction.
 - [x] Add Claude Code-style usage insights and model token mix graphic.
+- [x] Refactor dashboard into multiple views and add in-TUI custom date input.
+- [x] Add `today` preset and support same-day custom ranges like `2026-06-28..2026-06-28`.
+- [x] Prepare npm package metadata, license, README install docs, and publish checks.
 
 ## Key Areas
 
-- `package.json` — Pi package manifest, scripts, peer/dev deps.
+- `package.json` — Pi package manifest, publish metadata, scripts, peer/dev deps.
 - `src/index.ts` — registers `/pi-stats` command and opens TUI.
 - `src/stats.ts` — session JSONL parsing, incremental JSON cache, date ranges, aggregation.
-- `src/dashboard.ts` — dense Ops-console TUI component with ANSI colors, summary cards, usage insights, heatmap, model token graphic, and bordered top tables.
+- `src/dashboard.ts` — dense multi-view Ops-console TUI component with ANSI colors, global date input, summary cards, usage insights, heatmap, model token graphic, and bordered top tables.
 - `tests/stats.test.ts` — parser/cache/aggregation/range tests.
-- `README.md` — install/use/develop notes.
+- `README.md` — npm/local install, use, develop notes.
+- `LICENSE` — MIT license for npm publication.
 - `docs/ai-workflow/2026-06-28-pi-stats-extension.md` — live workflow artifact.
 
 ## Verification
 
 - `npm test` — passed. 4 tests cover session parsing, aggregation, cache reuse, and range parsing.
 - `npm run build` — passed. TypeScript compile succeeds.
+- `npm pack --dry-run` — verifies publish tarball contents.
 
 ## Open Questions And Risks
 
@@ -83,4 +88,4 @@ Research conclusion: this space is crowded. A useful custom extension should be 
 
 ## Handoff
 
-Next action for a fresh agent: optionally run `pi install ./`, reload Pi, and manually smoke-test `/pi-stats`, `/pi-stats 7d`, and `/pi-stats 2026-06-01..2026-06-30` inside Pi TUI against real local session history, checking insights, streaks, model token bars, ANSI colors, and table cropping at narrow/wide widths.
+Next action for a fresh agent: optionally run `pi install ./`, reload Pi, and manually smoke-test `/pi-stats`, `/pi-stats 7d`, and `/pi-stats 2026-06-01..2026-06-30` inside Pi TUI against real local session history, checking view switching (`o/m/p/s`, tab), custom date input (`d` + enter/esc), insights, streaks, model token bars, ANSI colors, and table cropping at narrow/wide widths. For publishing, run `npm publish` after confirming npm auth and repository URL.

@@ -80,7 +80,12 @@ test("reuses unchanged cached session files", async () => {
 test("parses supported ranges", () => {
   const now = Date.parse("2026-06-28T12:00:00.000Z");
   assert.equal(parseRange("", now).label, "last 30d");
+  assert.equal(parseRange("today", now).label, "today");
+  assert.equal(parseRange("today", now).start, Date.parse("2026-06-28T00:00:00.000Z"));
+  assert.equal(parseRange("today", now).end, Date.parse("2026-06-29T00:00:00.000Z"));
   assert.equal(parseRange("7", now).label, "last 7d");
   assert.equal(parseRange("all", now).label, "all time");
   assert.equal(parseRange("2026-06-01..2026-06-03", now).label, "2026-06-01..2026-06-03");
+  assert.equal(parseRange("2026-06-28..2026-06-28", now).start, Date.parse("2026-06-28T00:00:00.000Z"));
+  assert.equal(parseRange("2026-06-28..2026-06-28", now).end, Date.parse("2026-06-29T00:00:00.000Z"));
 });

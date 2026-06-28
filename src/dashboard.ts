@@ -10,7 +10,8 @@ import {
   type StatsCache,
 } from "./stats.js";
 
-const PRESETS = ["7d", "30d", "90d", "all"] as const;
+const PRESETS = ["today", "7d", "30d", "90d", "all"] as const;
+const VIEWS = ["overview", "models", "projects", "sessions"] as const;
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -29,6 +30,7 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 type Done = (value: void) => void;
+type View = (typeof VIEWS)[number];
 
 type DashboardOptions = {
   cache: StatsCache;
@@ -58,6 +60,10 @@ export class PiStatsDashboard {
   private arg: string;
   private stats: AggregatedStats;
   private refresh: string;
+  private view: View = "overview";
+  private dateEditing = false;
+  private dateInput = "";
+  private dateError = "";
   private cachedWidth = 0;
   private cachedLines: string[] | undefined;
 
@@ -92,21 +98,11 @@ export class PiStatsDashboard {
 
     lines.push(header(stats, this.refresh, w));
     lines.push(tabs(this.arg, w));
+    lines.push(viewTabs(this.view, w));
+    if (this.dateEditing || this.dateError) lines.push(datePrompt(this.dateInput, this.dateError, w));
     lines.push(legend(w));
     lines.push("");
-    lines.push(...summaryCards(stats, w));
-    lines.push("");
-    lines.push(...box("USAGE INSIGHTS", insightLines(dashboardInsights(this.cache, stats), stats, w - 4), w, FG.yellow));
-    lines.push("");
-    lines.push(...box(activityTitle(stats), heatmap(stats, w - 4), w, FG.green));
-    lines.push("");
-    lines.push(...box("MODEL TOKEN MIX / fresh tokens", modelTokenGraphic(stats, w - 4), w, FG.cyan));
-    lines.push("");
-    lines.push(...table("TOP MODELS", stats.models.slice(0, 8), modelColumns(), w, FG.cyan));
-    lines.push("");
-    lines.push(...table("TOP PROJECTS", stats.projects.slice(0, 8), projectColumns(w), w, FG.yellow));
-    lines.push("");
-    lines.push(...table("TOP SESSIONS", stats.sessions.slice(0, 8), sessionColumns(w), w, FG.magenta));
+    lines.push(...viewBody(this.view, this.cache, stats, w));
 
     this.cachedWidth = width;
     this.cachedLines = lines.map((line) => crop(line, width));
@@ -114,15 +110,26 @@ export class PiStatsDashboard {
   }
 
   handleInput(data: string): void {
+    if (this.dateEditing) {
+      this.handleDateInput(data);
+      return;
+    }
     if (data === "q" || data === "Q" || data === "\u001b" || data === "\x03") {
       this.done();
       return;
     }
-    if (data === "1") this.setArg("7d");
-    else if (data === "2") this.setArg("30d");
-    else if (data === "3") this.setArg("90d");
-    else if (data === "4") this.setArg("all");
-    else if (data === "\t" || data.includes("[C")) this.cycle(1);
+    if (data === "1") this.setArg("today");
+    else if (data === "2") this.setArg("7d");
+    else if (data === "3") this.setArg("30d");
+    else if (data === "4") this.setArg("90d");
+    else if (data === "5") this.setArg("all");
+    else if (data === "d" || data === "D") this.startDateInput();
+    else if (data === "o" || data === "O") this.setView("overview");
+    else if (data === "m" || data === "M") this.setView("models");
+    else if (data === "p" || data === "P") this.setView("projects");
+    else if (data === "s" || data === "S") this.setView("sessions");
+    else if (data === "\t") this.cycleView(1);
+    else if (data.includes("[C")) this.cycle(1);
     else if (data.includes("[D")) this.cycle(-1);
   }
 
@@ -131,9 +138,45 @@ export class PiStatsDashboard {
     this.cachedWidth = 0;
   }
 
+  private handleDateInput(data: string): void {
+    if (data === "\u001b" || data === "\x03") {
+      this.dateEditing = false;
+      this.dateError = "";
+    } else if (data === "\r" || data === "\n") {
+      const next = this.dateInput.trim().toLowerCase();
+      if (isValidRangeArg(next)) {
+        this.setArg(next);
+        this.dateEditing = false;
+        this.dateError = "";
+      } else {
+        this.dateError = "use today, 7d, 30d, 90d, all, or YYYY-MM-DD..YYYY-MM-DD";
+      }
+    } else if (data === "\x7f" || data === "\b") {
+      this.dateInput = this.dateInput.slice(0, -1);
+      this.dateError = "";
+    } else if (/^[\x20-\x7e]+$/.test(data)) {
+      this.dateInput = (this.dateInput + data).slice(0, 40);
+      this.dateError = "";
+    }
+    this.invalidate();
+  }
+
+  private startDateInput(): void {
+    this.dateEditing = true;
+    this.dateInput = "";
+    this.dateError = "";
+    this.invalidate();
+  }
+
+  private setView(view: View): void {
+    this.view = view;
+    this.invalidate();
+  }
+
   private setArg(arg: string): void {
-    this.arg = arg;
+    this.arg = normalizeArg(arg);
     this.stats = aggregate(this.cache, parseRange(this.arg));
+    this.dateError = "";
     this.invalidate();
   }
 
@@ -142,6 +185,11 @@ export class PiStatsDashboard {
     const next = current === -1 ? 1 : (current + delta + PRESETS.length) % PRESETS.length;
     this.setArg(PRESETS[next]!);
   }
+
+  private cycleView(delta: number): void {
+    const current = VIEWS.indexOf(this.view);
+    this.setView(VIEWS[(current + delta + VIEWS.length) % VIEWS.length]!);
+  }
 }
 
 export function normalizeArg(args: string): string {
@@ -149,6 +197,16 @@ export function normalizeArg(args: string): string {
   if (!text) return "30d";
   if (/^\d+$/.test(text)) return `${text}d`;
   return text;
+}
+
+function isValidRangeArg(arg: string): boolean {
+  const text = normalizeArg(arg);
+  if (["today", "7d", "30d", "90d", "all"].includes(text)) return true;
+  const custom = text.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
+  if (!custom) return false;
+  const start = Date.parse(`${custom[1]}T00:00:00.000Z`);
+  const end = Date.parse(`${custom[2]}T00:00:00.000Z`);
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start;
 }
 
 function header(stats: AggregatedStats, refresh: string, width: number): string {
@@ -164,11 +222,40 @@ function tabs(active: string, width: number): string {
     const label = `${index + 1}:${preset}`;
     return preset === active ? `${BG.cyan}${FG.white}${BOLD} ${label} ${RESET}` : `${FG.gray} ${label} ${RESET}`;
   });
-  return crop(`${labels.join(" ")} ${DIM}←/→ cycle · q/esc close${RESET}`, width);
+  return crop(`${labels.join(" ")} ${DIM}d custom · ←/→ range · q/esc close${RESET}`, width);
+}
+
+function viewTabs(active: View, width: number): string {
+  const labels: Array<[View, string]> = [
+    ["overview", "O:overview"],
+    ["models", "M:models"],
+    ["projects", "P:projects"],
+    ["sessions", "S:sessions"],
+  ];
+  return crop(labels.map(([view, label]) => (view === active ? `${BG.blue}${FG.white}${BOLD} ${label} ${RESET}` : `${FG.gray} ${label} ${RESET}`)).join(" ") + ` ${DIM}tab view${RESET}`, width);
+}
+
+function datePrompt(input: string, error: string, width: number): string {
+  const prompt = `${FG.yellow}date>${RESET} ${input}${BOLD}_${RESET}`;
+  const help = error ? `${FG.red}${error}${RESET}` : `${DIM}enter applies · esc cancels · e.g. today, 7d, all, 2026-06-28..2026-06-28${RESET}`;
+  return crop(`${prompt} ${help}`, width);
 }
 
 function legend(width: number): string {
-  return crop(`${DIM}Ops console view · dense tables · color = scan cue · no network, local cache only${RESET}`, width);
+  return crop(`${DIM}Global date filter applies to every view · local cache only${RESET}`, width);
+}
+
+function viewBody(view: View, cache: StatsCache, stats: AggregatedStats, width: number): string[] {
+  if (view === "models") return [...box("MODEL TOKEN MIX / fresh tokens", modelTokenGraphic(stats, width - 4), width, FG.cyan), "", ...table("TOP MODELS", stats.models.slice(0, 12), modelColumns(), width, FG.cyan)];
+  if (view === "projects") return table("TOP PROJECTS", stats.projects.slice(0, 14), projectColumns(width), width, FG.yellow);
+  if (view === "sessions") return table("TOP SESSIONS", stats.sessions.slice(0, 14), sessionColumns(width), width, FG.magenta);
+  return [
+    ...summaryCards(stats, width),
+    "",
+    ...box("USAGE INSIGHTS", insightLines(dashboardInsights(cache, stats), stats, width - 4), width, FG.yellow),
+    "",
+    ...box(activityTitle(stats), heatmap(stats, width - 4), width, FG.green),
+  ];
 }
 
 function dashboardInsights(cache: StatsCache, stats: AggregatedStats): InsightStats {
