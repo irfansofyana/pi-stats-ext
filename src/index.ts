@@ -1,0 +1,36 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { PiStatsDashboard } from "./dashboard.js";
+import { getDefaultPaths, loadCache, refreshCache } from "./stats.js";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerCommand("pi-stats", {
+    description: "Show local Pi usage stats, heatmap, top models, projects, and sessions.",
+    handler: async (args, ctx) => {
+      const { sessionDir, cachePath } = getDefaultPaths();
+      const cached = await loadCache(cachePath);
+
+      if (ctx.mode !== "tui") {
+        const result = await refreshCache(sessionDir, cachePath);
+        const count = Object.values(result.cache.files).reduce((sum, file) => sum + file.session.events.length, 0);
+        console.log(`pi-stats indexed ${result.totalFiles} sessions, ${count} usage events`);
+        return;
+      }
+
+      await ctx.ui.custom<void>((tui, _theme, _keybindings, done) => {
+        const dashboard = new PiStatsDashboard({ cache: cached, args, done });
+
+        void refreshCache(sessionDir, cachePath)
+          .then((result) => {
+            dashboard.setRefreshResult(result);
+            tui.requestRender();
+          })
+          .catch((error) => {
+            dashboard.setRefreshError(error);
+            tui.requestRender();
+          });
+
+        return dashboard;
+      });
+    },
+  });
+}
