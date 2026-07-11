@@ -12,19 +12,31 @@ export default function (pi: ExtensionAPI) {
       if (ctx.mode !== "tui") {
         const result = await refreshCache(sessionDir, cachePath);
         const count = Object.values(result.cache.files).reduce((sum, file) => sum + file.session.events.length, 0);
-        console.log(`pi-stats indexed ${result.totalFiles} sessions, ${count} usage events`);
+        const errors = result.errors.length ? `, ${result.errors.length} errors` : "";
+        console.log(`pi-stats indexed ${result.totalFiles} sessions, ${count} usage events${errors}`);
         return;
       }
 
-      await ctx.ui.custom<void>((tui, _theme, _keybindings, done) => {
-        const dashboard = new PiStatsDashboard({ cache: cached, args, done });
+      await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+        let active = true;
+        const dashboard = new PiStatsDashboard({
+          cache: cached,
+          args,
+          done: () => {
+            active = false;
+            done();
+          },
+          theme,
+        });
 
         void refreshCache(sessionDir, cachePath)
           .then((result) => {
+            if (!active) return;
             dashboard.setRefreshResult(result);
             tui.requestRender();
           })
           .catch((error) => {
+            if (!active) return;
             dashboard.setRefreshError(error);
             tui.requestRender();
           });

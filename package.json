@@ -1,6 +1,6 @@
 {
   "name": "pi-stats-ext",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dense local-first Pi coding-agent usage dashboard for tokens, costs, models, projects, and sessions.",
   "type": "module",
   "main": "./src/index.ts",
