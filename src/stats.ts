@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -14,6 +15,7 @@ export type UsageTotals = {
 };
 
 export type UsageEvent = UsageTotals & {
+  eventId?: string;
   timestamp: number;
   day: string;
   provider: string;
@@ -44,7 +46,7 @@ export type CachedFile = {
 };
 
 export type StatsCache = {
-  version: 1;
+  version: 2;
   files: Record<string, CachedFile>;
 };
 
@@ -116,8 +118,15 @@ export function dayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
+export function parseDateKey(input: string): number | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return undefined;
+  const timestamp = Date.parse(`${input}T00:00:00.000Z`);
+  if (!Number.isFinite(timestamp) || dayKey(timestamp) !== input) return undefined;
+  return timestamp;
+}
+
 export function parseRange(input: string, now = Date.now()): DateRange {
-  const text = input.trim();
+  const text = input.trim().toLowerCase();
   if (!text || text === "30" || text === "30d") return lastDaysRange(30, now);
   if (text === "today") return lastDaysRange(1, now, "today");
   if (text === "7" || text === "7d") return lastDaysRange(7, now);
@@ -126,10 +135,10 @@ export function parseRange(input: string, now = Date.now()): DateRange {
 
   const custom = text.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
   if (custom) {
-    const start = Date.parse(`${custom[1]}T00:00:00.000Z`);
-    const end = Date.parse(`${custom[2]}T00:00:00.000Z`) + DAY_MS;
-    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
-      return { label: `${custom[1]}..${custom[2]}`, start, end };
+    const start = parseDateKey(custom[1]!);
+    const inclusiveEnd = parseDateKey(custom[2]!);
+    if (start !== undefined && inclusiveEnd !== undefined && inclusiveEnd >= start) {
+      return { label: `${custom[1]}..${custom[2]}`, start, end: inclusiveEnd + DAY_MS };
     }
   }
 
@@ -142,47 +151,106 @@ function lastDaysRange(days: number, now: number, label = `last ${days}d`): Date
   return { label, start, end: endDay };
 }
 
+function emptyCache(): StatsCache {
+  return { version: 2, files: {} };
+}
+
+function isStatsCache(value: unknown): value is StatsCache {
+  if (!isRecord(value) || value.version !== 2 || !isRecord(value.files)) return false;
+  return Object.values(value.files).every(isCachedFile);
+}
+
+function isCachedFile(value: unknown): value is CachedFile {
+  if (!isRecord(value) || typeof value.path !== "string" || !finiteNumber(value.mtimeMs) || !finiteNumber(value.size) || !finiteNumber(value.parsedAt)) return false;
+  const session = value.session;
+  if (!isRecord(session) || typeof session.sessionPath !== "string" || typeof session.sessionId !== "string" || typeof session.sessionName !== "string") return false;
+  if (typeof session.cwd !== "string" || typeof session.project !== "string" || !finiteNumber(session.startedAt) || !Array.isArray(session.events)) return false;
+  return session.events.every(isUsageEvent);
+}
+
+function isUsageEvent(value: unknown): value is UsageEvent {
+  if (!isRecord(value)) return false;
+  const numericKeys: Array<keyof UsageTotals | "timestamp"> = ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "freshTokens", "cost", "messages", "timestamp"];
+  if (!numericKeys.every((key) => finiteNumber(value[key]))) return false;
+  const stringKeys = ["day", "provider", "model", "sessionPath", "sessionId", "sessionName", "cwd", "project"] as const;
+  if (!stringKeys.every((key) => typeof value[key] === "string")) return false;
+  return value.eventId === undefined || typeof value.eventId === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export async function loadCache(cachePath: string): Promise<StatsCache> {
   try {
     const raw = await readFile(cachePath, "utf8");
-    const parsed = JSON.parse(raw) as StatsCache;
-    if (parsed.version === 1 && parsed.files && typeof parsed.files === "object") return parsed;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isStatsCache(parsed)) return parsed;
   } catch {
-    // no cache yet
+    // Missing, truncated, or invalid caches are rebuilt from session files.
   }
-  return { version: 1, files: {} };
+  return emptyCache();
 }
 
 export async function saveCache(cachePath: string, cache: StatsCache): Promise<void> {
   await mkdir(dirname(cachePath), { recursive: true });
-  await writeFile(cachePath, JSON.stringify(cache, null, 2), "utf8");
+  const temporaryPath = `${cachePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, JSON.stringify(cache, null, 2), "utf8");
+    await rename(temporaryPath, cachePath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 export async function refreshCache(sessionDir: string, cachePath: string): Promise<RefreshResult> {
   const cache = await loadCache(cachePath);
-  const files = await listSessionFiles(sessionDir);
+  let files: string[];
+  try {
+    files = await listSessionFiles(sessionDir);
+  } catch (error) {
+    const cachedCount = Object.keys(cache.files).length;
+    return {
+      cache,
+      totalFiles: cachedCount,
+      parsedFiles: 0,
+      reusedFiles: cachedCount,
+      errors: [{ path: sessionDir, message: error instanceof Error ? error.message : String(error) }],
+    };
+  }
+
   const nextFiles: Record<string, CachedFile> = {};
   const errors: RefreshResult["errors"] = [];
   let parsedFiles = 0;
   let reusedFiles = 0;
 
   for (const file of files) {
+    const cached = cache.files[file];
     try {
       const s = await stat(file);
-      const cached = cache.files[file];
       if (cached && cached.mtimeMs === s.mtimeMs && cached.size === s.size) {
         nextFiles[file] = cached;
         reusedFiles++;
         continue;
       }
+      if (cached && s.size < cached.size) throw new Error(`session file shrank from ${cached.size} to ${s.size} bytes`);
       nextFiles[file] = { path: file, mtimeMs: s.mtimeMs, size: s.size, parsedAt: Date.now(), session: await parseSessionFile(file) };
       parsedFiles++;
     } catch (error) {
+      if (cached) {
+        nextFiles[file] = cached;
+        reusedFiles++;
+      }
       errors.push({ path: file, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  const nextCache: StatsCache = { version: 1, files: nextFiles };
+  const nextCache: StatsCache = { version: 2, files: nextFiles };
   await saveCache(cachePath, nextCache);
   return { cache: nextCache, totalFiles: files.length, parsedFiles, reusedFiles, errors };
 }
@@ -192,12 +260,7 @@ export async function listSessionFiles(sessionDir: string): Promise<string[]> {
   const out: string[] = [];
 
   async function walk(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
+    const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const p = join(dir, entry.name);
       if (entry.isDirectory()) await walk(p);
@@ -256,6 +319,7 @@ export function parseSessionText(raw: string, file = "session.jsonl"): SessionSu
 
     const usage = message.usage;
     const timestamp = (normalizeTimestamp(message.timestamp) ?? normalizeTimestamp(entry.timestamp) ?? startedAt) || 0;
+    if (!timestamp) continue;
     const input = number(usage.input);
     const output = number(usage.output);
     const cacheRead = number(usage.cacheRead);
@@ -265,6 +329,7 @@ export function parseSessionText(raw: string, file = "session.jsonl"): SessionSu
     const project = projectLabel(cwd);
 
     events.push({
+      eventId: typeof entry.id === "string" && entry.id ? entry.id : typeof message.id === "string" && message.id ? message.id : undefined,
       timestamp,
       day: dayKey(timestamp),
       provider: String(message.provider || "unknown"),
@@ -302,7 +367,10 @@ export function aggregate(cache: StatsCache, range: DateRange): AggregatedStats 
   for (const file of Object.values(cache.files)) {
     for (const event of file.session.events) {
       if (!inRange(event.timestamp, range)) continue;
-      const fingerprint = `${event.timestamp}|${event.provider}|${event.model}|${event.totalTokens}|${event.cost.toFixed(8)}`;
+      const usageFingerprint = `${event.timestamp}|${event.provider}|${event.model}|${event.input}|${event.output}|${event.cacheRead}|${event.cacheWrite}|${event.totalTokens}|${event.cost.toFixed(8)}`;
+      const fingerprint = event.eventId
+        ? `id:${event.eventId}|${usageFingerprint}`
+        : `path:${event.sessionPath}|${usageFingerprint}`;
       if (seenEvents.has(fingerprint)) continue;
       seenEvents.add(fingerprint);
 

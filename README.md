@@ -6,7 +6,7 @@ Local-first Pi coding-agent usage dashboard.
 
 ![pi-stats overview](docs/img/pi-stats-overview.png)
 
-![pi-stats dashboard](docs/img/pi-stats-dashboard.png)
+![pi-stats models](docs/img/pi-stats-dashboard.png)
 
 ## Dashboard
 
@@ -14,12 +14,14 @@ Local-first Pi coding-agent usage dashboard.
 
 - global date ranges: default `30d`, plus `today`, `7d`, `90d`, `all`, or `YYYY-MM-DD..YYYY-MM-DD`
 - multi-view layout: Overview, Models, Projects, Sessions
-- colored summary cards for fresh tokens, cost, cache, sessions/projects
-- Claude Code-style insights: favorite model, total tokens, most active day, longest session, longest/current streak
-- terminal heatmap with month labels, exact date range, and intensity legend for daily fresh tokens
-- model token mix graphic with proportional bars, percentages, and input/output tokens
-- bordered tables for top models, projects, and sessions by cost/tokens
-- keyboard controls: `1` today, `2` 7d, `3` 30d, `4` 90d, `5` all, `d` custom date input, `o`/`m`/`p`/`s` views, tab cycles views, left/right cycles range, `q`/`esc` close
+- responsive, Pi-theme-aware summary cards for fresh tokens, cost, cache leverage, and cost per million fresh tokens
+- previous-period comparisons that expose changes in spend, usage, cache leverage, and efficiency
+- decision signals for cost shifts, cache regressions, stable usage, and model concentration
+- responsive Activity panel with a calendar heatmap, collision-free month labels, active-day cadence, peak/average usage, streaks, busiest weekday, and a fresh-token trend
+- keyboard-driven model efficiency table with usage share, cost, cache leverage, and cost per million fresh tokens
+- model inspector with provider, reach, efficiency baseline, and a practical routing recommendation
+- bordered tables for projects and sessions by cost/tokens
+- keyboard controls: `1` today, `2` 7d, `3` 30d, `4` 90d, `5` all, `d` custom date input, `o`/`m`/`p`/`s` views, tab cycles views, left/right cycles range, up/down or `j`/`k` selects a model, enter inspects it, `q`/`esc` closes
 - incremental JSON cache at `~/.pi/agent/pi-stats/cache.json`
 
 ## Installation
